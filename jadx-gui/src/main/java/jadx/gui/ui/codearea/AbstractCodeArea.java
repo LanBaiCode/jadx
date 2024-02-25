@@ -36,7 +36,6 @@ import org.fife.ui.rsyntaxtextarea.TokenMakerFactory;
 import org.fife.ui.rsyntaxtextarea.TokenTypes;
 import org.fife.ui.rtextarea.SearchContext;
 import org.fife.ui.rtextarea.SearchEngine;
-import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -108,7 +107,6 @@ public abstract class AbstractCodeArea extends RSyntaxTextArea {
 	private void applyEditableProperties(JNode node) {
 		boolean editable = node.isEditable();
 		setEditable(editable);
-		setCodeFoldingEnabled(editable);
 		if (editable) {
 			setCloseCurlyBraces(true);
 			setCloseMarkupTags(true);
@@ -272,44 +270,72 @@ public abstract class AbstractCodeArea extends RSyntaxTextArea {
 		return getWordByPosition(getCaretPosition());
 	}
 
-	@Nullable
-	public String getWordByPosition(int pos) {
+	public @Nullable String getWordByPosition(int offset) {
+		Token token = getWordTokenAtOffset(offset);
+		if (token != null) {
+			return token.getLexeme();
+		}
+		return null;
+	}
+
+	/**
+	 * Return any word token (not whitespace or special symbol) at offset.
+	 * Select the previous token if the cursor at word end (current token already is whitespace)
+	 */
+	public @Nullable Token getWordTokenAtOffset(int offset) {
 		try {
-			Token token = modelToToken(pos);
-			return getWordFromToken(token);
+			int line = this.getLineOfOffset(offset);
+			Token lineTokens = this.getTokenListForLine(line);
+			Token token = null;
+			Token prevToken = null;
+			for (Token t = lineTokens; t != null && t.isPaintable(); t = t.getNextToken()) {
+				if (t.containsPosition(offset)) {
+					token = t;
+					break;
+				}
+				prevToken = t;
+			}
+			if (token == null) {
+				return null;
+			}
+			if (isWordToken(token)) {
+				return token;
+			}
+			if (isWordToken(prevToken)) {
+				return prevToken;
+			}
+			return null;
 		} catch (Exception e) {
-			LOG.error("Failed to get word at pos: {}", pos, e);
+			LOG.error("Failed to get token at pos: {}", offset, e);
 			return null;
 		}
 	}
 
-	@Nullable
-	private static String getWordFromToken(@Nullable Token token) {
+	public static boolean isWordToken(@Nullable Token token) {
 		if (token == null) {
-			return null;
+			return false;
 		}
 		switch (token.getType()) {
 			case TokenTypes.NULL:
 			case TokenTypes.WHITESPACE:
 			case TokenTypes.SEPARATOR:
 			case TokenTypes.OPERATOR:
-				return null;
+			case TokenTypes.FUNCTION:
+				return false;
 
 			case TokenTypes.IDENTIFIER:
 				if (token.length() == 1) {
 					char ch = token.charAt(0);
-					if (ch == ';' || ch == '.') {
-						return null;
-					}
+					return ch != ';' && ch != '.' && ch != ',';
 				}
-				return token.getLexeme();
+				return true;
 
 			default:
-				return token.getLexeme();
+				return true;
 		}
 	}
 
-	public abstract @NotNull ICodeInfo getCodeInfo();
+	public abstract ICodeInfo getCodeInfo();
 
 	/**
 	 * Implement in this method the code that loads and sets the content to be displayed
@@ -386,8 +412,7 @@ public abstract class AbstractCodeArea extends RSyntaxTextArea {
 	}
 
 	/**
-	 * @param str
-	 *            - if null -> reset current highlights
+	 * @param str - if null -> reset current highlights
 	 */
 	private void highlightAllMatches(@Nullable String str) {
 		SearchContext context = new SearchContext(str);

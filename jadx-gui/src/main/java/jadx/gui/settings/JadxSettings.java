@@ -52,7 +52,7 @@ public class JadxSettings extends JadxCLIArgs {
 
 	private static final Path USER_HOME = Paths.get(System.getProperty("user.home"));
 	private static final int RECENT_PROJECTS_COUNT = 30;
-	private static final int CURRENT_SETTINGS_VERSION = 18;
+	private static final int CURRENT_SETTINGS_VERSION = 19;
 
 	private static final Font DEFAULT_FONT = new RSyntaxTextArea().getFont();
 
@@ -75,7 +75,22 @@ public class JadxSettings extends JadxCLIArgs {
 	private LangLocale langLocale = NLS.defaultLocale();
 	private boolean autoStartJobs = false;
 	private String excludedPackages = "";
-	private boolean autoSaveProject = true;
+	private SAVEOPTION saveOption = SAVEOPTION.ASK;
+
+	public enum SAVEOPTION {
+		ASK,
+		NEVER,
+		ALWAYS
+	}
+
+	public SAVEOPTION getSaveOption() {
+		return saveOption;
+	}
+
+	public void setSaveOption(SAVEOPTION saveOption) {
+		this.saveOption = saveOption;
+	}
+
 	private Map<ActionModel, Shortcut> shortcuts = new HashMap<>();
 
 	@JadxSettingsAdapter.GsonExclude
@@ -109,6 +124,8 @@ public class JadxSettings extends JadxCLIArgs {
 	private @Nullable String cacheDir = null; // null - default (system), "." - at project dir, other - custom
 
 	private boolean jumpOnDoubleClick = true;
+
+	private XposedCodegenLanguage xposedCodegenLanguage = XposedCodegenLanguage.JAVA;
 
 	/**
 	 * UI setting: the width of the tree showing the classes, resources, ...
@@ -445,14 +462,6 @@ public class JadxSettings extends JadxCLIArgs {
 		this.autoStartJobs = autoStartJobs;
 	}
 
-	public boolean isAutoSaveProject() {
-		return autoSaveProject;
-	}
-
-	public void setAutoSaveProject(boolean autoSaveProject) {
-		this.autoSaveProject = autoSaveProject;
-	}
-
 	public ShortcutsWrapper getShortcuts() {
 		if (shortcutsWrapper == null) {
 			shortcutsWrapper = new ShortcutsWrapper();
@@ -732,6 +741,14 @@ public class JadxSettings extends JadxCLIArgs {
 		partialSync(settings -> this.dockLogViewer = dockLogViewer);
 	}
 
+	public XposedCodegenLanguage getXposedCodegenLanguage() {
+		return xposedCodegenLanguage;
+	}
+
+	public void setXposedCodegenLanguage(XposedCodegenLanguage language) {
+		this.xposedCodegenLanguage = language;
+	}
+
 	private void upgradeSettings(int fromVersion) {
 		LOG.debug("upgrade settings from version: {} to {}", fromVersion, CURRENT_SETTINGS_VERSION);
 		if (fromVersion <= 10) {
@@ -767,6 +784,10 @@ public class JadxSettings extends JadxCLIArgs {
 		}
 		if (fromVersion == 17) {
 			checkForUpdates = true;
+			fromVersion++;
+		}
+		if (fromVersion == 18) {
+			xposedCodegenLanguage = XposedCodegenLanguage.JAVA;
 			fromVersion++;
 		}
 		if (fromVersion != CURRENT_SETTINGS_VERSION) {

@@ -59,6 +59,7 @@ import jadx.api.plugins.gui.ISettingsGroup;
 import jadx.gui.settings.JadxSettings;
 import jadx.gui.settings.JadxSettingsAdapter;
 import jadx.gui.settings.LineNumbersMode;
+import jadx.gui.settings.XposedCodegenLanguage;
 import jadx.gui.settings.ui.cache.CacheSettingsGroup;
 import jadx.gui.settings.ui.plugins.PluginSettings;
 import jadx.gui.settings.ui.shortcut.ShortcutsSettingsGroup;
@@ -309,12 +310,15 @@ public class JadxSettingsWindow extends JDialog {
 	}
 
 	private SettingsGroup makeProjectGroup() {
-		JCheckBox autoSave = new JCheckBox();
-		autoSave.setSelected(settings.isAutoSaveProject());
-		autoSave.addItemListener(e -> settings.setAutoSaveProject(e.getStateChange() == ItemEvent.SELECTED));
+		JComboBox<JadxSettings.SAVEOPTION> dropdown = new JComboBox<>(JadxSettings.SAVEOPTION.values());
+		dropdown.setSelectedItem(settings.getSaveOption());
+		dropdown.addActionListener(e -> {
+			settings.setSaveOption((JadxSettings.SAVEOPTION) dropdown.getSelectedItem());
+			needReload();
+		});
 
 		SettingsGroup group = new SettingsGroup(NLS.str("preferences.project"));
-		group.addRow(NLS.str("preferences.autoSave"), autoSave);
+		group.addRow(NLS.str("preferences.saveOption"), dropdown);
 
 		return group;
 	}
@@ -622,6 +626,14 @@ public class JadxSettingsWindow extends JDialog {
 			needReload();
 		});
 
+		JComboBox<XposedCodegenLanguage> xposedCodegenLanguage =
+				new JComboBox<>(XposedCodegenLanguage.getEntries().toArray(new XposedCodegenLanguage[0]));
+		xposedCodegenLanguage.setSelectedItem(settings.getXposedCodegenLanguage());
+		xposedCodegenLanguage.addActionListener(e -> {
+			settings.setXposedCodegenLanguage((XposedCodegenLanguage) xposedCodegenLanguage.getSelectedItem());
+			mainWindow.loadSettings();
+		});
+
 		SettingsGroup group = new SettingsGroup(NLS.str("preferences.other"));
 		group.addRow(NLS.str("preferences.lineNumbersMode"), lineNumbersMode);
 		group.addRow(NLS.str("preferences.jumpOnDoubleClick"), jumpOnDoubleClick);
@@ -629,6 +641,7 @@ public class JadxSettingsWindow extends JDialog {
 		group.addRow(NLS.str("preferences.check_for_updates"), update);
 		group.addRow(NLS.str("preferences.cfg"), cfg);
 		group.addRow(NLS.str("preferences.raw_cfg"), rawCfg);
+		group.addRow(NLS.str("preferences.xposed_codegen_language"), xposedCodegenLanguage);
 		return group;
 	}
 

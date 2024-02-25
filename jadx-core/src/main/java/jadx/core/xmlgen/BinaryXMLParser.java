@@ -37,11 +37,10 @@ import jadx.core.xmlgen.entry.ValuesParser;
 public class BinaryXMLParser extends CommonBinaryParser {
 	private static final Logger LOG = LoggerFactory.getLogger(BinaryXMLParser.class);
 
-	private static final boolean ATTR_NEW_LINE = true;
-
 	private final Map<Integer, String> resNames;
 	private Map<String, String> nsMap;
 	private Set<String> nsMapGenerated;
+	private Set<String> definedNamespaces;
 	private final Map<String, String> tagAttrDeobfNames = new HashMap<>();
 
 	private ICodeWriter writer;
@@ -59,8 +58,11 @@ public class BinaryXMLParser extends CommonBinaryParser {
 
 	private Map<String, ClassNode> classNameCache;
 
+	private final boolean attrNewLine;
+
 	public BinaryXMLParser(RootNode rootNode) {
 		this.rootNode = rootNode;
+		this.attrNewLine = !rootNode.getArgs().isSkipXmlPrettyPrint();
 		try {
 			ConstStorage constStorage = rootNode.getConstValues();
 			resNames = constStorage.getResourcesNames();
@@ -77,11 +79,13 @@ public class BinaryXMLParser extends CommonBinaryParser {
 		}
 		nsMapGenerated = new HashSet<>();
 		nsMap = new HashMap<>();
+		definedNamespaces = new HashSet<>();
 		writer = rootNode.makeCodeWriter();
 		writer.add("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
 		firstElement = true;
 		decode();
 		nsMap = null;
+		definedNamespaces = null;
 		ICodeInfo codeInfo = writer.finish();
 		this.classNameCache = null; // reset class name cache
 		return codeInfo;
@@ -268,18 +272,21 @@ public class BinaryXMLParser extends CommonBinaryParser {
 		int idIndex = is.readInt16();
 		int classIndex = is.readInt16();
 		int styleIndex = is.readInt16();
-		if ("manifest".equals(currentTag) || writer.getIndent() == 0) {
+		if ("manifest".equals(currentTag) || definedNamespaces.size() != nsMap.size()) {
 			for (Map.Entry<String, String> entry : nsMap.entrySet()) {
-				String nsValue = getValidTagAttributeName(entry.getValue());
-				writer.add(" xmlns");
-				if (nsValue != null && !nsValue.trim().isEmpty()) {
-					writer.add(':');
-					writer.add(nsValue);
+				if (!definedNamespaces.contains(entry.getKey())) {
+					definedNamespaces.add(entry.getKey());
+					String nsValue = getValidTagAttributeName(entry.getValue());
+					writer.add(" xmlns");
+					if (nsValue != null && !nsValue.trim().isEmpty()) {
+						writer.add(':');
+						writer.add(nsValue);
+					}
+					writer.add("=\"").add(StringUtils.escapeXML(entry.getKey())).add('"');
 				}
-				writer.add("=\"").add(StringUtils.escapeXML(entry.getKey())).add('"');
 			}
 		}
-		boolean attrNewLine = attributeCount != 1 && ATTR_NEW_LINE;
+		boolean attrNewLine = attributeCount != 1 && this.attrNewLine;
 		for (int i = 0; i < attributeCount; i++) {
 			parseAttribute(i, attrNewLine);
 		}
