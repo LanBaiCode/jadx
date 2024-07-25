@@ -22,6 +22,7 @@ import jadx.api.plugins.utils.ZipSecurity;
 import jadx.core.deobf.NameMapper;
 import jadx.core.dex.attributes.AFlag;
 import jadx.core.dex.nodes.FieldNode;
+import jadx.core.dex.nodes.IFieldInfoRef;
 import jadx.core.dex.nodes.RootNode;
 import jadx.core.utils.BetterName;
 import jadx.core.utils.exceptions.JadxRuntimeException;
@@ -31,8 +32,8 @@ import jadx.core.xmlgen.entry.RawValue;
 import jadx.core.xmlgen.entry.ResourceEntry;
 import jadx.core.xmlgen.entry.ValuesParser;
 
-public class ResTableParser extends CommonBinaryParser implements IResParser {
-	private static final Logger LOG = LoggerFactory.getLogger(ResTableParser.class);
+public class ResTableBinaryParser extends CommonBinaryParser implements IResTableParser {
+	private static final Logger LOG = LoggerFactory.getLogger(ResTableBinaryParser.class);
 
 	private static final Pattern VALID_RES_KEY_PATTERN = Pattern.compile("[\\w\\d_]+");
 
@@ -74,11 +75,11 @@ public class ResTableParser extends CommonBinaryParser implements IResParser {
 	private final ResourceStorage resStorage = new ResourceStorage();
 	private BinaryXMLStrings strings;
 
-	public ResTableParser(RootNode root) {
+	public ResTableBinaryParser(RootNode root) {
 		this(root, false);
 	}
 
-	public ResTableParser(RootNode root, boolean useRawResNames) {
+	public ResTableBinaryParser(RootNode root, boolean useRawResNames) {
 		this.root = root;
 		this.useRawResName = useRawResNames;
 	}
@@ -95,14 +96,13 @@ public class ResTableParser extends CommonBinaryParser implements IResParser {
 		}
 	}
 
-	public ResContainer decodeFiles(InputStream inputStream) throws IOException {
-		decode(inputStream);
-
+	@Override
+	public ResContainer decodeFiles() {
 		ValuesParser vp = new ValuesParser(strings, resStorage.getResourcesNames());
 		ResXmlGen resGen = new ResXmlGen(resStorage, vp);
 
 		ICodeInfo content = XmlGenUtils.makeXmlDump(root.makeCodeWriter(), resStorage);
-		List<ResContainer> xmlFiles = resGen.makeResourcesXml();
+		List<ResContainer> xmlFiles = resGen.makeResourcesXml(root.getArgs());
 		return ResContainer.resourceTable("res", xmlFiles, content);
 	}
 
@@ -123,8 +123,8 @@ public class ResTableParser extends CommonBinaryParser implements IResParser {
 		long start = is.getPos();
 		is.checkInt16(RES_TABLE_PACKAGE_TYPE, "Not a table chunk");
 		int headerSize = is.readInt16();
-		if (headerSize != 0x011c && headerSize != 0x0120) {
-			die("Unexpected package header size");
+		if (headerSize < 0x011c) {
+			die("Package header size too small");
 		}
 		long size = is.readUInt32();
 		long endPos = start + size;
@@ -138,10 +138,12 @@ public class ResTableParser extends CommonBinaryParser implements IResParser {
 		long keyStringsOffset = start + is.readInt32();
 		/* int lastPublicKey = */
 		is.readInt32();
-		if (headerSize == 0x0120) {
+
+		if (headerSize >= 0x0120) {
 			/* int typeIdOffset = */
 			is.readInt32();
 		}
+		is.skipToPos(start + headerSize, "package header end");
 
 		BinaryXMLStrings typeStrings = null;
 		if (typeStringsOffset != 0) {
@@ -417,7 +419,8 @@ public class ResTableParser extends CommonBinaryParser implements IResParser {
 		if (typeName.equals("style")) {
 			return origKeyName;
 		}
-		FieldNode constField = root.getConstValues().getGlobalConstFields().get(resRef);
+		IFieldInfoRef fldRef = root.getConstValues().getGlobalConstFields().get(resRef);
+		FieldNode constField = fldRef instanceof FieldNode ? (FieldNode) fldRef : null;
 		String resAlias = getResAlias(resRef, origKeyName, constField);
 		resStorage.addRename(resRef, resAlias);
 		if (constField != null) {

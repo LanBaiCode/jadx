@@ -140,11 +140,11 @@ import jadx.gui.ui.panel.IssuesPanel;
 import jadx.gui.ui.panel.JDebuggerPanel;
 import jadx.gui.ui.panel.ProgressPanel;
 import jadx.gui.ui.popupmenu.RecentProjectsMenuListener;
+import jadx.gui.ui.tab.TabbedPane;
+import jadx.gui.ui.tab.dnd.TabDndController;
 import jadx.gui.ui.treenodes.StartPageNode;
 import jadx.gui.ui.treenodes.SummaryNode;
 import jadx.gui.update.JadxUpdate;
-import jadx.gui.update.JadxUpdate.IUpdateCallback;
-import jadx.gui.update.data.Release;
 import jadx.gui.utils.CacheObject;
 import jadx.gui.utils.FontUtils;
 import jadx.gui.utils.ILoadListener;
@@ -309,15 +309,18 @@ public class MainWindow extends JFrame {
 		if (!settings.isCheckForUpdates()) {
 			return;
 		}
-		JadxUpdate.check(new IUpdateCallback() {
-			@Override
-			public void onUpdate(Release r) {
-				SwingUtilities.invokeLater(() -> {
-					updateLink.setText(NLS.str("menu.update_label", r.getName()));
-					updateLink.setVisible(true);
-				});
+		JadxUpdate.check(settings.getJadxUpdateChannel(), release -> SwingUtilities.invokeLater(() -> {
+			switch (settings.getJadxUpdateChannel()) {
+				case STABLE:
+					updateLink.setUrl(JadxUpdate.JADX_RELEASES_URL);
+					break;
+				case UNSTABLE:
+					updateLink.setUrl(JadxUpdate.JADX_ARTIFACTS_URL);
+					break;
 			}
-		});
+			updateLink.setText(NLS.str("menu.update_label", release.getName()));
+			updateLink.setVisible(true);
+		}));
 	}
 
 	public void openFileDialog() {
@@ -458,6 +461,9 @@ public class MainWindow extends JFrame {
 	}
 
 	private boolean openSingleFile(Path singleFile, Runnable onFinish) {
+		if (singleFile.getFileName() == null) {
+			return false;
+		}
 		String fileExtension = CommonFileUtils.getFileExtension(singleFile.getFileName().toString());
 		if (fileExtension != null && fileExtension.equalsIgnoreCase(JadxProject.PROJECT_EXTENSION)) {
 			openProject(singleFile, onFinish);
@@ -946,7 +952,7 @@ public class MainWindow extends JFrame {
 		SearchDialog.search(MainWindow.this, SearchDialog.SearchPreset.TEXT);
 	}
 
-	public void gotoMainActivity() {
+	public void goToMainActivity() {
 		AndroidManifestParser parser = new AndroidManifestParser(
 				AndroidManifestParser.getAndroidManifest(getWrapper().getResources()),
 				EnumSet.of(AppAttribute.MAIN_ACTIVITY));
@@ -959,18 +965,48 @@ public class MainWindow extends JFrame {
 		}
 		try {
 			ApplicationParams results = parser.parse();
-			if (results.getMainActivityName() == null) {
+			if (results.getMainActivity() == null) {
 				throw new JadxRuntimeException("Failed to get main activity name from manifest");
 			}
-			JavaClass mainActivityClass = results.getMainActivity(getWrapper().getDecompiler());
+			JavaClass mainActivityClass = results.getMainActivityJavaClass(getWrapper().getDecompiler());
 			if (mainActivityClass == null) {
-				throw new JadxRuntimeException("Failed to find main activity class: " + results.getMainActivityName());
+				throw new JadxRuntimeException("Failed to find main activity class: " + results.getMainActivity());
 			}
 			tabbedPane.codeJump(getCacheObject().getNodeCache().makeFrom(mainActivityClass));
 		} catch (Exception e) {
 			LOG.error("Main activity not found", e);
 			JOptionPane.showMessageDialog(MainWindow.this,
 					NLS.str("error_dialog.not_found", "Main Activity"),
+					NLS.str("error_dialog.title"),
+					JOptionPane.ERROR_MESSAGE);
+		}
+	}
+
+	public void goToApplication() {
+		AndroidManifestParser parser = new AndroidManifestParser(
+				AndroidManifestParser.getAndroidManifest(getWrapper().getResources()),
+				EnumSet.of(AppAttribute.APPLICATION));
+		if (!parser.isManifestFound()) {
+			JOptionPane.showMessageDialog(MainWindow.this,
+					NLS.str("error_dialog.not_found", "AndroidManifest.xml"),
+					NLS.str("error_dialog.title"),
+					JOptionPane.ERROR_MESSAGE);
+			return;
+		}
+		try {
+			ApplicationParams results = parser.parse();
+			if (results.getApplication() == null) {
+				throw new JadxRuntimeException("Failed to get application from manifest");
+			}
+			JavaClass applicationClass = results.getApplicationJavaClass(getWrapper().getDecompiler());
+			if (applicationClass == null) {
+				throw new JadxRuntimeException("Failed to find application class: " + results.getApplication());
+			}
+			tabbedPane.codeJump(getCacheObject().getNodeCache().makeFrom(applicationClass));
+		} catch (Exception e) {
+			LOG.error("Application not found", e);
+			JOptionPane.showMessageDialog(MainWindow.this,
+					NLS.str("error_dialog.not_found", "Application"),
 					NLS.str("error_dialog.title"),
 					JOptionPane.ERROR_MESSAGE);
 		}
@@ -1030,8 +1066,10 @@ public class MainWindow extends JFrame {
 				() -> SearchDialog.search(MainWindow.this, SearchDialog.SearchPreset.CLASS));
 		JadxGuiAction commentSearchAction = new JadxGuiAction(ActionModel.COMMENT_SEARCH,
 				() -> SearchDialog.search(MainWindow.this, SearchDialog.SearchPreset.COMMENT));
-		JadxGuiAction gotoMainActivityAction = new JadxGuiAction(ActionModel.GOTO_MAIN_ACTIVITY,
-				this::gotoMainActivity);
+		JadxGuiAction goToMainActivityAction = new JadxGuiAction(ActionModel.GO_TO_MAIN_ACTIVITY,
+				this::goToMainActivity);
+		JadxGuiAction goToApplicationAction = new JadxGuiAction(ActionModel.GO_TO_APPLICATION,
+				this::goToApplication);
 		JadxGuiAction decompileAllAction = new JadxGuiAction(ActionModel.DECOMPILE_ALL, this::requestFullDecompilation);
 		JadxGuiAction resetCacheAction = new JadxGuiAction(ActionModel.RESET_CACHE, this::resetCodeCache);
 		JadxGuiAction deobfAction = new JadxGuiAction(ActionModel.DEOBF, this::toggleDeobfuscation);
@@ -1091,7 +1129,8 @@ public class MainWindow extends JFrame {
 		nav.add(textSearchAction);
 		nav.add(clsSearchAction);
 		nav.add(commentSearchAction);
-		nav.add(gotoMainActivityAction);
+		nav.add(goToMainActivityAction);
+		nav.add(goToApplicationAction);
 		nav.addSeparator();
 		nav.add(backAction);
 		nav.add(forwardAction);
@@ -1137,7 +1176,7 @@ public class MainWindow extends JFrame {
 		flatPkgButton.addActionListener(flatPkgAction);
 		flatPkgButton.setToolTipText(NLS.str("menu.flatten"));
 
-		updateLink = new Link("", JadxUpdate.JADX_RELEASES_URL);
+		updateLink = new Link();
 		updateLink.setVisible(false);
 
 		JToolBar toolbar = new JToolBar();
@@ -1156,7 +1195,8 @@ public class MainWindow extends JFrame {
 		toolbar.add(textSearchAction);
 		toolbar.add(clsSearchAction);
 		toolbar.add(commentSearchAction);
-		toolbar.add(gotoMainActivityAction);
+		toolbar.add(goToMainActivityAction);
+		toolbar.add(goToApplicationAction);
 		toolbar.addSeparator();
 		toolbar.add(backAction);
 		toolbar.add(forwardAction);
@@ -1184,7 +1224,8 @@ public class MainWindow extends JFrame {
 			textSearchAction.setEnabled(loaded);
 			clsSearchAction.setEnabled(loaded);
 			commentSearchAction.setEnabled(loaded);
-			gotoMainActivityAction.setEnabled(loaded);
+			goToMainActivityAction.setEnabled(loaded);
+			goToApplicationAction.setEnabled(loaded);
 			backAction.setEnabled(loaded);
 			backVariantAction.setEnabled(loaded);
 			forwardAction.setEnabled(loaded);
@@ -1304,6 +1345,7 @@ public class MainWindow extends JFrame {
 
 		tabbedPane = new TabbedPane(this);
 		tabbedPane.setMinimumSize(new Dimension(150, 150));
+		new TabDndController(tabbedPane, settings);
 
 		rightSplitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
 		rightSplitPane.setTopComponent(tabbedPane);

@@ -58,6 +58,7 @@ import jadx.api.plugins.events.JadxEvents;
 import jadx.api.plugins.gui.ISettingsGroup;
 import jadx.gui.settings.JadxSettings;
 import jadx.gui.settings.JadxSettingsAdapter;
+import jadx.gui.settings.JadxUpdateChannel;
 import jadx.gui.settings.LineNumbersMode;
 import jadx.gui.settings.XposedCodegenLanguage;
 import jadx.gui.settings.ui.cache.CacheSettingsGroup;
@@ -65,6 +66,7 @@ import jadx.gui.settings.ui.plugins.PluginSettings;
 import jadx.gui.settings.ui.shortcut.ShortcutsSettingsGroup;
 import jadx.gui.ui.MainWindow;
 import jadx.gui.ui.codearea.EditorTheme;
+import jadx.gui.ui.tab.dnd.TabDndGhostType;
 import jadx.gui.utils.FontUtils;
 import jadx.gui.utils.LafManager;
 import jadx.gui.utils.LangLocale;
@@ -396,6 +398,15 @@ public class JadxSettingsWindow extends JDialog {
 				}
 			}
 		});
+
+		JComboBox<TabDndGhostType> tabDndGhostTypeCbx = new JComboBox<>(TabDndGhostType.values());
+		tabDndGhostTypeCbx.setSelectedItem(settings.getTabDndGhostType());
+		tabDndGhostTypeCbx.addActionListener(e -> {
+			settings.setTabDndGhostType((TabDndGhostType) tabDndGhostTypeCbx.getSelectedItem());
+			mainWindow.loadSettings();
+		});
+		group.addRow(NLS.str("preferences.tab_dnd_appearance"), tabDndGhostTypeCbx);
+
 		return group;
 	}
 
@@ -634,6 +645,14 @@ public class JadxSettingsWindow extends JDialog {
 			mainWindow.loadSettings();
 		});
 
+		JComboBox<JadxUpdateChannel> updateChannel =
+				new JComboBox<>(JadxUpdateChannel.getEntries().toArray(new JadxUpdateChannel[0]));
+		updateChannel.setSelectedItem(settings.getJadxUpdateChannel());
+		updateChannel.addActionListener(e -> {
+			settings.setJadxUpdateChannel((JadxUpdateChannel) updateChannel.getSelectedItem());
+			mainWindow.loadSettings();
+		});
+
 		SettingsGroup group = new SettingsGroup(NLS.str("preferences.other"));
 		group.addRow(NLS.str("preferences.lineNumbersMode"), lineNumbersMode);
 		group.addRow(NLS.str("preferences.jumpOnDoubleClick"), jumpOnDoubleClick);
@@ -642,6 +661,7 @@ public class JadxSettingsWindow extends JDialog {
 		group.addRow(NLS.str("preferences.cfg"), cfg);
 		group.addRow(NLS.str("preferences.raw_cfg"), rawCfg);
 		group.addRow(NLS.str("preferences.xposed_codegen_language"), xposedCodegenLanguage);
+		group.addRow(NLS.str("preferences.update_channel"), updateChannel);
 		return group;
 	}
 

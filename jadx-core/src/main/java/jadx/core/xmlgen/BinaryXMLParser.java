@@ -19,6 +19,7 @@ import jadx.core.dex.info.ConstStorage;
 import jadx.core.dex.nodes.ClassNode;
 import jadx.core.dex.nodes.RootNode;
 import jadx.core.utils.StringUtils;
+import jadx.core.utils.android.AndroidResourcesMap;
 import jadx.core.utils.exceptions.JadxRuntimeException;
 import jadx.core.xmlgen.entry.ValuesParser;
 
@@ -193,10 +194,8 @@ public class BinaryXMLParser extends CommonBinaryParser {
 			die("NAMESPACE end is not 0x10 big");
 		}
 		int dataSize = is.readInt32();
-		if (dataSize > 0x18) {
-			LOG.warn("Invalid namespace size");
-		} else if (dataSize < 0x18) {
-			die("NAMESPACE header chunk is not 0x18 big");
+		if (dataSize != 0x18) {
+			LOG.warn("Invalid namespace end size");
 		}
 		int endLineNumber = is.readInt32();
 		int comment = is.readInt32();
@@ -246,7 +245,8 @@ public class BinaryXMLParser extends CommonBinaryParser {
 			die("ELEMENT HEADER SIZE is not 0x10");
 		}
 		// TODO: Check element chunk size
-		is.readInt32();
+		long startPos = is.getPos();
+		int elementSize = is.readInt32();
 		int elementBegLineNumber = is.readInt32();
 		int comment = is.readInt32();
 		int startNS = is.readInt32();
@@ -265,9 +265,10 @@ public class BinaryXMLParser extends CommonBinaryParser {
 			die("startNS's attributeStart is not 0x14");
 		}
 		int attributeSize = is.readInt16();
-		if (attributeSize != 0x14) {
-			die("startNS's attributeSize is not 0x14");
+		if (attributeSize < 0x14) {
+			die("startNS's attributeSize is less than 0x14");
 		}
+
 		int attributeCount = is.readInt16();
 		int idIndex = is.readInt16();
 		int classIndex = is.readInt16();
@@ -286,13 +287,18 @@ public class BinaryXMLParser extends CommonBinaryParser {
 				}
 			}
 		}
+		Set<String> attrCache = new HashSet<>();
 		boolean attrNewLine = attributeCount != 1 && this.attrNewLine;
 		for (int i = 0; i < attributeCount; i++) {
-			parseAttribute(i, attrNewLine);
+			parseAttribute(i, attrNewLine, attrCache, attributeSize);
+		}
+		long endPos = is.getPos();
+		if (endPos - startPos + 0x4 < elementSize) {
+			is.skip(elementSize - (endPos - startPos + 0x4));
 		}
 	}
 
-	private void parseAttribute(int i, boolean newLine) throws IOException {
+	private void parseAttribute(int i, boolean newLine, Set<String> attrCache, int attributeSize) throws IOException {
 		int attributeNS = is.readInt32();
 		int attributeName = is.readInt32();
 		int attributeRawValue = is.readInt32();
@@ -300,29 +306,36 @@ public class BinaryXMLParser extends CommonBinaryParser {
 		int attrValDataType = is.readInt8();
 		int attrValData = is.readInt32();
 
+		is.skip(attributeSize - 0x14);
+
+		String shortNsName = null;
+		if (attributeNS != -1) {
+			shortNsName = getAttributeNS(attributeNS, newLine);
+		}
+		String attrName = getValidTagAttributeName(getAttributeName(attributeName));
+		String attrFullName = shortNsName != null ? shortNsName + ":" + attrName : attrName;
+		// do not dump duplicated values
+		if (XmlDeobf.isDuplicatedAttr(attrFullName, attrCache)) {
+			return;
+		}
+
 		if (newLine) {
 			writer.startLine().addIndent();
 		} else {
 			writer.add(' ');
 		}
-		String shortNsName = null;
-		if (attributeNS != -1) {
-			shortNsName = getAttributeNS(attributeNS);
-			writer.add(shortNsName).add(':');
-		}
-		String attrName = getValidTagAttributeName(getAttributeName(attributeName));
-		writer.add(attrName).add("=\"");
+		writer.add(attrFullName).add("=\"");
 		String decodedAttr = ManifestAttributes.getInstance().decode(attrName, attrValData);
 		if (decodedAttr != null) {
 			memorizePackageName(attrName, decodedAttr);
-			if (isDeobfCandidateAttr(shortNsName, attrName)) {
+			if (isDeobfCandidateAttr(attrFullName)) {
 				decodedAttr = deobfClassName(decodedAttr);
 			}
 			attachClassNode(writer, attrName, decodedAttr);
 			writer.add(StringUtils.escapeXML(decodedAttr));
 		} else {
 			decodeAttribute(attributeNS, attrValDataType, attrValData,
-					shortNsName, attrName);
+					attrFullName);
 		}
 		if (shortNsName != null && shortNsName.equals("android")) {
 			if (attrName.equals("pathData")) {
@@ -334,7 +347,7 @@ public class BinaryXMLParser extends CommonBinaryParser {
 		writer.add('"');
 	}
 
-	private String getAttributeNS(int attributeNS) {
+	private String getAttributeNS(int attributeNS, boolean newLine) {
 		String attrUrl = getString(attributeNS);
 		if (attrUrl == null || attrUrl.isEmpty()) {
 			if (isResInternalId(attributeNS)) {
@@ -345,12 +358,12 @@ public class BinaryXMLParser extends CommonBinaryParser {
 		}
 		String attrName = nsMap.get(attrUrl);
 		if (attrName == null) {
-			attrName = generateNameForNS(attrUrl);
+			attrName = generateNameForNS(attrUrl, newLine);
 		}
 		return attrName;
 	}
 
-	private String generateNameForNS(String attrUrl) {
+	private String generateNameForNS(String attrUrl, boolean newLine) {
 		String attrName;
 		if (ANDROID_NS_URL.equals(attrUrl)) {
 			attrName = ANDROID_NS_VALUE;
@@ -366,6 +379,11 @@ public class BinaryXMLParser extends CommonBinaryParser {
 				}
 			}
 		}
+		if (newLine) {
+			writer.startLine().addIndent();
+		} else {
+			writer.add(' ');
+		}
 		writer.add("xmlns:").add(attrName).add("=\"").add(attrUrl).add("\" ");
 		return attrName;
 	}
@@ -376,7 +394,7 @@ public class BinaryXMLParser extends CommonBinaryParser {
 		// there is no entry uses the values form the XML string pool
 		if (resourceIds != null && 0 <= id && id < resourceIds.length) {
 			int resId = resourceIds[id];
-			String str = ValuesParser.getAndroidResMap().get(resId);
+			String str = AndroidResourcesMap.getResName(resId);
 			if (str != null) {
 				// cut type before /
 				int typeEnd = str.indexOf('/');
@@ -402,7 +420,7 @@ public class BinaryXMLParser extends CommonBinaryParser {
 	}
 
 	private void decodeAttribute(int attributeNS, int attrValDataType, int attrValData,
-			String shortNsName, String attrName) {
+			String attrFullName) {
 		if (attrValDataType == TYPE_REFERENCE) {
 			// reference custom processing
 			String resName = resNames.get(attrValData);
@@ -413,7 +431,7 @@ public class BinaryXMLParser extends CommonBinaryParser {
 				}
 				writer.add(resName);
 			} else {
-				String androidResName = ValuesParser.getAndroidResMap().get(attrValData);
+				String androidResName = AndroidResourcesMap.getResName(attrValData);
 				if (androidResName != null) {
 					writer.add("@android:").add(androidResName);
 				} else if (attrValData == 0) {
@@ -423,12 +441,18 @@ public class BinaryXMLParser extends CommonBinaryParser {
 				}
 			}
 		} else {
-			String str = valuesParser.decodeValue(attrValDataType, attrValData);
-			memorizePackageName(attrName, str);
-			if (isDeobfCandidateAttr(shortNsName, attrName)) {
+			String str;
+			try {
+				str = valuesParser.decodeValue(attrValDataType, attrValData);
+			} catch (JadxRuntimeException e) {
+				LOG.error("Failed to decode attribute value of \"{}\"", attrFullName, e);
+				str = null;
+			}
+			memorizePackageName(attrFullName, str);
+			if (isDeobfCandidateAttr(attrFullName)) {
 				str = deobfClassName(str);
 			}
-			attachClassNode(writer, attrName, str);
+			attachClassNode(writer, attrFullName, str);
 			writer.add(str != null ? StringUtils.escapeXML(str) : "null");
 		}
 	}
@@ -487,11 +511,11 @@ public class BinaryXMLParser extends CommonBinaryParser {
 		return sb.toString();
 	}
 
-	private void attachClassNode(ICodeWriter writer, String attrName, String clsName) {
+	private void attachClassNode(ICodeWriter writer, String attrFullName, String clsName) {
 		if (!writer.isMetadataSupported()) {
 			return;
 		}
-		if (clsName == null || !attrName.equals("name")) {
+		if (clsName == null || !attrFullName.equals("android:name")) {
 			return;
 		}
 		String clsFullName;
@@ -517,18 +541,12 @@ public class BinaryXMLParser extends CommonBinaryParser {
 		return className;
 	}
 
-	private boolean isDeobfCandidateAttr(String shortNsName, String attrName) {
-		String fullName;
-		if (shortNsName != null) {
-			fullName = shortNsName + ':' + attrName;
-		} else {
-			return false;
-		}
-		return "android:name".equals(fullName);
+	private boolean isDeobfCandidateAttr(String attrFullName) {
+		return "android:name".equals(attrFullName);
 	}
 
-	private void memorizePackageName(String attrName, String attrValue) {
-		if ("manifest".equals(currentTag) && "package".equals(attrName)) {
+	private void memorizePackageName(String attrFullName, String attrValue) {
+		if ("manifest".equals(currentTag) && "package".equals(attrFullName)) {
 			appPackageName = attrValue;
 		}
 	}
